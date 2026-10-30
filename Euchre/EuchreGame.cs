@@ -21,6 +21,9 @@ public class EuchreGame : UdonSharpBehaviour
     public EuchreCard upcard;
     public TMP_Text trumpText;       // big trump suit marker in the middle of the table
     public EuchreButton[] actionButtons; // 4 seats x ButtonSlots context buttons
+    public Transform[] trickSpots;       // each seat's played card, turned toward the viewer locally
+    public Transform upcardSpot;
+    public Transform trumpSpot;
     public Renderer[] tableRenderers;
     public Renderer[] buttonRenderers;
     public Renderer[] sitButtonRenderers;
@@ -45,6 +48,13 @@ public class EuchreGame : UdonSharpBehaviour
     public float trickPauseSeconds = 1.5f;
     [Tooltip("Seconds before the next hand is dealt on its own. 0 = wait for Next Hand.")]
     public float nextHandSeconds = 6f;
+
+    [Header("Readable table")]
+    [Tooltip("On your screen, other players' played cards, the upcard and the trump marker turn to face you and tilt up.")]
+    public bool faceCardsToViewer = true;
+    public float cardTilt = 55f;
+    [Tooltip("Size of the turned cards on your screen.")]
+    public float cardScale = 1.5f;
 
     [Header("Testing")]
     [Tooltip("Lets the local player act for every seat and start without 4 players.")]
@@ -109,6 +119,11 @@ public class EuchreGame : UdonSharpBehaviour
     bool botStepQueued = false; // owner only
     bool timerQueued = false;
     float nextCountdownRefresh = 0f;
+    Vector3[] trickHome = new Vector3[4];
+    Quaternion[] trickHomeRot = new Quaternion[4];
+    Vector3 upHome, trumpHome;
+    Quaternion upHomeRot, trumpHomeRot;
+    bool homesSaved = false;
     int[] slotCode = new int[20];
     int[] slotArg = new int[20];
     int slotFill = 0;
@@ -149,6 +164,7 @@ public class EuchreGame : UdonSharpBehaviour
 
     void Update()
     {
+        UpdateFacing();
         if (phase == PhaseHandOver && nextHandSeconds > 0f && statusText != null && Time.time >= nextCountdownRefresh)
         {
             nextCountdownRefresh = Time.time + 0.25f;
@@ -165,6 +181,28 @@ public class EuchreGame : UdonSharpBehaviour
     public override void OnDeserialization()
     {
         Refresh();
+    }
+
+    /// Owner: seats whose player is no longer in the instance go to a bot (mid-game) or open up. Covers a player
+    /// who left while ownership was moving, when no owner was around to handle OnPlayerLeft.
+    void ReleaseMissingPlayers()
+    {
+        bool changed = false;
+        for (int s = 0; s < 4; s++)
+        {
+            if (seatPlayers[s] < 0) continue;
+            if (Utilities.IsValid(VRCPlayerApi.GetPlayerById(seatPlayers[s]))) continue;
+            seatPlayers[s] = IsRunning() ? BotSeat : -1;
+            changed = true;
+        }
+        if (!changed) return;
+        lastEvent = IsRunning() ? "A player left. A bot took over their seat." : "A player left.";
+        Commit();
+    }
+
+    public override void OnPlayerJoined(VRCPlayerApi player)
+    {
+        Refresh(); // seat names come from the player list
     }
 
     public override void OnPlayerLeft(VRCPlayerApi player)
@@ -188,6 +226,7 @@ public class EuchreGame : UdonSharpBehaviour
         if (!Networking.IsOwner(gameObject)) return;
         botStepQueued = false;
         timerQueued = false;
+        ReleaseMissingPlayers();
         ScheduleBots();
         ScheduleNextHand();
     }
@@ -930,6 +969,70 @@ public class EuchreGame : UdonSharpBehaviour
             if (SlotOf(s, o) < 0) return true;
         }
         return false;
+    }
+
+    // ================= readable table =================
+
+    /// Local only: other players' played cards, the upcard and the trump marker turn so they read upright for
+    /// this viewer and tilt up. Your own played card stays flat. Purely visual, so it isn't synced.
+    void UpdateFacing()
+    {
+        if (trickSpots == null || trickSpots.Length < 4) return;
+        if (!homesSaved)
+        {
+            for (int s = 0; s < 4; s++)
+            {
+                if (trickSpots[s] == null) continue;
+                trickHome[s] = trickSpots[s].localPosition;
+                trickHomeRot[s] = trickSpots[s].localRotation;
+            }
+            if (upcardSpot != null) { upHome = upcardSpot.localPosition; upHomeRot = upcardSpot.localRotation; }
+            if (trumpSpot != null) { trumpHome = trumpSpot.localPosition; trumpHomeRot = trumpSpot.localRotation; }
+            homesSaved = true;
+        }
+
+        int me = LocalSeat();
+        Vector3 viewer;
+        if (me >= 0 && trickSpots[me] != null)
+        {
+            // Seated: look from about where that seat's player sits, so the cards hold still.
+            Vector3 centre = transform.position;
+            Vector3 out1 = trickSpots[me].parent.TransformPoint(trickHome[me]) - centre;
+            out1.y = 0f;
+            viewer = centre + out1 * 4.5f;
+        }
+        else
+        {
+            VRCPlayerApi local = Networking.LocalPlayer;
+            if (!Utilities.IsValid(local)) return;
+            viewer = local.GetTrackingData(VRCPlayerApi.TrackingDataType.Head).position;
+        }
+
+        for (int s = 0; s < 4; s++)
+            FaceViewer(trickSpots[s], trickHome[s], trickHomeRot[s], faceCardsToViewer && s != me, viewer, cardTilt, cardScale, 0.045f);
+        FaceViewer(upcardSpot, upHome, upHomeRot, faceCardsToViewer, viewer, cardTilt, cardScale, 0.045f);
+        FaceViewer(trumpSpot, trumpHome, trumpHomeRot, faceCardsToViewer, viewer, cardTilt, 1f, 0.05f);
+    }
+
+    /// Turns p (at its home spot) so its +Z, the top of the card, points away from the viewer, tilts the far
+    /// edge up and raises it by enough (halfDepth = distance from the pivot to the near edge) to clear the table.
+    void FaceViewer(Transform p, Vector3 home, Quaternion homeRot, bool face, Vector3 viewer, float tilt, float scale, float halfDepth)
+    {
+        if (p == null) return;
+        if (!face)
+        {
+            p.localPosition = home;
+            p.localRotation = homeRot;
+            p.localScale = Vector3.one;
+            return;
+        }
+        Vector3 homeWorld = p.parent.TransformPoint(home);
+        Vector3 d = viewer - homeWorld;
+        d.y = 0f;
+        if (d.sqrMagnitude < 0.0001f) return;
+        p.rotation = Quaternion.LookRotation(-d) * Quaternion.Euler(-tilt, 0f, 0f);
+        p.position = homeWorld + Vector3.up * (halfDepth * scale * Mathf.Sin(tilt * Mathf.Deg2Rad) + 0.005f);
+        p.localScale = Vector3.one * scale;
     }
 
     // ================= players =================
