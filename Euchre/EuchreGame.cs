@@ -20,6 +20,7 @@ public class EuchreGame : UdonSharpBehaviour
     public EuchreCard[] trickCards;  // one per seat
     public EuchreCard upcard;
     public TMP_Text trumpText;       // big trump suit marker in the middle of the table
+    public EuchreButton[] actionButtons; // 4 seats x ButtonSlots context buttons
     public Renderer[] tableRenderers;
     public Renderer[] buttonRenderers;
     public Renderer[] sitButtonRenderers;
@@ -69,6 +70,18 @@ public class EuchreGame : UdonSharpBehaviour
     const int ActDiscardCard = 9;   // arg: card id
 
     const int BotSeat = -2;         // seatPlayers value for a bot-controlled seat
+
+    // Context buttons: each seat has ButtonSlots buttons that show only the choices available right now.
+    public const int ButtonSlots = 5;
+    const int BtnNone = 0;
+    const int BtnOrder = 1;
+    const int BtnOrderAlone = 2;
+    const int BtnPass = 3;
+    const int BtnSuit = 4;          // arg: suit
+    const int BtnAloneToggle = 5;
+    const int BtnStart = 6;
+    const int BtnNext = 7;
+    const int BtnReset = 8;
     const int HandSize = 6;
 
     [UdonSynced] int[] seatPlayers = { -1, -1, -1, -1 };
@@ -96,6 +109,9 @@ public class EuchreGame : UdonSharpBehaviour
     bool botStepQueued = false; // owner only
     bool timerQueued = false;
     float nextCountdownRefresh = 0f;
+    int[] slotCode = new int[20];
+    int[] slotArg = new int[20];
+    int slotFill = 0;
 
     string[] suitNames = { "Clubs", "Spades", "Hearts", "Diamonds" };
     string[] suitSymbols = { "♣", "♠", "♥", "♦" };
@@ -1051,7 +1067,77 @@ public class EuchreGame : UdonSharpBehaviour
             trumpText.color = (trump == 2 || trump == 3) ? new Color(0.9f, 0.15f, 0.15f) : new Color(0.05f, 0.05f, 0.05f);
         }
 
+        UpdateButtons();
         if (statusText != null) statusText.text = BuildStatus();
+    }
+
+    // ================= context buttons =================
+
+    /// Called by a context button. Runs whatever that slot is showing for the local player.
+    public void OnActionButton(int seat, int slot)
+    {
+        if (seat < 0 || seat > 3 || slot < 0 || slot >= ButtonSlots || !ControlsSeat(seat)) return;
+        int code = slotCode[seat * ButtonSlots + slot];
+        int arg = slotArg[seat * ButtonSlots + slot];
+        if (code == BtnOrder) { localAlone = false; ActOrderUp(); }
+        else if (code == BtnOrderAlone) { localAlone = true; ActOrderUp(); }
+        else if (code == BtnPass) ActPass();
+        else if (code == BtnSuit) CallSuit(arg);
+        else if (code == BtnAloneToggle) ActToggleAlone();
+        else if (code == BtnStart) ActStart();
+        else if (code == BtnNext) ActNextHand();
+        else if (code == BtnReset) ActReset();
+    }
+
+    void UpdateButtons()
+    {
+        if (actionButtons == null) return;
+        for (int s = 0; s < 4; s++)
+        {
+            slotFill = 0;
+            if (ControlsSeat(s)) AddSeatButtons(s);
+            for (int k = slotFill; k < ButtonSlots; k++) SetSlot(s, k, BtnNone, 0, "");
+        }
+    }
+
+    void AddSeatButtons(int s)
+    {
+        if (phase == PhaseLobby) { AddButton(s, BtnStart, 0, "Start"); return; }
+        if (phase == PhaseGameOver) { AddButton(s, BtnStart, 0, "New Game"); return; }
+        if (phase == PhaseHandOver)
+        {
+            AddButton(s, BtnNext, 0, "Next Hand");
+            AddButton(s, BtnReset, 0, "Reset");
+            return;
+        }
+        if (s != turn) return;
+        if (phase == PhaseBid1)
+        {
+            AddButton(s, BtnOrder, 0, s == dealer ? "Pick Up" : "Order Up");
+            AddButton(s, BtnOrderAlone, 0, "Go Alone");
+            AddButton(s, BtnPass, 0, "Pass");
+        }
+        else if (phase == PhaseBid2)
+        {
+            for (int suit = 0; suit < 4; suit++) if (suit != turnedDown) AddButton(s, BtnSuit, suit, suitNames[suit]);
+            if (!(stickTheDealer && s == dealer)) AddButton(s, BtnPass, 0, "Pass");
+            AddButton(s, BtnAloneToggle, 0, localAlone ? "Alone: On" : "Alone: Off");
+        }
+    }
+
+    void AddButton(int s, int code, int arg, string text)
+    {
+        if (slotFill >= ButtonSlots) return;
+        SetSlot(s, slotFill, code, arg, text);
+        slotFill++;
+    }
+
+    void SetSlot(int s, int k, int code, int arg, string text)
+    {
+        int i = s * ButtonSlots + k;
+        slotCode[i] = code;
+        slotArg[i] = arg;
+        if (i < actionButtons.Length && actionButtons[i] != null) actionButtons[i].Show(text);
     }
 
     int TrickWinnerOrNone()
