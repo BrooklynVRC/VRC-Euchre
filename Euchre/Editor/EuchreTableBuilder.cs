@@ -9,8 +9,6 @@ using UdonSharpEditor;
 /// Builds a complete, wired-up euchre table at the world origin.
 public static class EuchreTableBuilder
 {
-    static readonly string[] Labels  = { "Pass", "Order Up", "Clubs", "Spades", "Hearts", "Diamonds", "Alone", "Start", "Next Hand", "Reset" };
-    static readonly string[] Actions = { "ActPass", "ActOrderUp", "ActCallClubs", "ActCallSpades", "ActCallHearts", "ActCallDiamonds", "ActToggleAlone", "ActStart", "ActNextHand", "ActReset" };
 
     const float TableY = 0.775f; // top surface height
     const string MaterialFolder = "Assets/Euchre/Materials";
@@ -49,6 +47,7 @@ public static class EuchreTableBuilder
         var seatLabels = new TMP_Text[4];
         var handCards = new EuchreCard[24];
         var trickCards = new EuchreCard[4];
+        var actionButtons = new EuchreButton[4 * EuchreGame.ButtonSlots];
 
         for (int s = 0; s < 4; s++)
         {
@@ -80,13 +79,16 @@ public static class EuchreTableBuilder
             // Trick slot
             trickCards[s] = Card("TrickCard", anchor, new Vector3(0, TableY + 0.004f, -0.2f), Quaternion.Euler(90, 0, 0), game, s, 0, true);
 
-            // Action buttons
-            for (int b = 0; b < Labels.Length; b++)
+            // Context buttons: the game fills them left to right with only the choices available right now.
+            for (int b = 0; b < EuchreGame.ButtonSlots; b++)
             {
-                var pos = new Vector3(-0.45f + b * 0.1f, TableY + 0.012f, -0.73f);
-                var go = ButtonObject("Btn_" + Labels[b], anchor, pos, buttonMat, Labels[b], buttonRenderers);
+                var pos = new Vector3(-0.3f + b * 0.12f, TableY + 0.012f, -0.73f);
+                var go = ButtonObject("Action" + b, anchor, pos, buttonMat, "", buttonRenderers, 0.11f);
                 var btn = UdonSharpUndo.AddComponent<EuchreButton>(go);
-                btn.game = game; btn.action = Actions[b]; btn.label = Labels[b];
+                btn.game = game; btn.seat = s; btn.slot = b;
+                btn.label = go.GetComponentInChildren<TextMeshPro>();
+                btn.face = buttonRenderers[buttonRenderers.Count - 1];
+                actionButtons[s * EuchreGame.ButtonSlots + b] = btn;
                 EditorUtility.SetDirty(btn);
             }
         }
@@ -104,6 +106,7 @@ public static class EuchreTableBuilder
         game.trickCards = trickCards;
         game.upcard = up;
         game.trumpText = trumpText;
+        game.actionButtons = actionButtons;
         game.tableRenderers = tableRenderers;
         game.buttonRenderers = buttonRenderers.ToArray();
         game.sitButtonRenderers = sitButtonRenderers.ToArray();
@@ -227,21 +230,24 @@ public static class EuchreTableBuilder
         return t;
     }
 
-    static GameObject ButtonObject(string name, Transform parent, Vector3 pos, Material mat, string label, List<Renderer> renderers)
+    static GameObject ButtonObject(string name, Transform parent, Vector3 pos, Material mat, string label, List<Renderer> renderers, float width = 0.085f)
     {
         var go = new GameObject(name);
         go.transform.SetParent(parent, false);
         go.transform.localPosition = pos;
         var col = go.AddComponent<BoxCollider>();
-        col.size = new Vector3(0.085f, 0.02f, 0.05f);
+        col.size = new Vector3(width, 0.02f, 0.05f);
 
-        var face = Prim(PrimitiveType.Cube, "Face", go.transform, Vector3.zero, Quaternion.identity, new Vector3(0.085f, 0.02f, 0.05f));
+        var face = Prim(PrimitiveType.Cube, "Face", go.transform, Vector3.zero, Quaternion.identity, new Vector3(width, 0.02f, 0.05f));
         Object.DestroyImmediate(face.GetComponent<Collider>());
         var r = face.GetComponent<Renderer>();
         r.sharedMaterial = mat;
         renderers.Add(r);
 
-        var t = Text("Label", go.transform, new Vector3(0, 0.0115f, 0), Quaternion.Euler(90, 0, 0), 0.16f, new Vector2(0.085f, 0.05f), Color.black, false);
+        var t = Text("Label", go.transform, new Vector3(0, 0.0115f, 0), Quaternion.Euler(90, 0, 0), 0.16f, new Vector2(width - 0.006f, 0.045f), Color.black, false);
+        t.enableAutoSizing = true;
+        t.fontSizeMin = 0.06f;
+        t.fontSizeMax = 0.16f;
         t.text = label;
         return go;
     }
