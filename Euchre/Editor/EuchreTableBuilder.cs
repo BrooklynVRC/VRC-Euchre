@@ -48,6 +48,7 @@ public static class EuchreTableBuilder
         var handCards = new EuchreCard[24];
         var trickCards = new EuchreCard[4];
         var actionButtons = new EuchreButton[4 * EuchreGame.ButtonSlots];
+        var trickSpots = new Transform[4];
 
         for (int s = 0; s < 4; s++)
         {
@@ -77,7 +78,10 @@ public static class EuchreTableBuilder
             }
 
             // Trick slot
-            trickCards[s] = Card("TrickCard", anchor, new Vector3(0, TableY + 0.004f, -0.2f), Quaternion.Euler(90, 0, 0), game, s, 0, true);
+            // Trick slot, under a spot each client turns and tilts toward itself.
+            var spot = Spot("TrickSpot", anchor, new Vector3(0, TableY + 0.004f, -0.2f));
+            trickSpots[s] = spot;
+            trickCards[s] = Card("TrickCard", spot, Vector3.zero, Quaternion.Euler(90, 0, 0), game, s, 0, true);
 
             // Context buttons: the game fills them left to right with only the choices available right now.
             for (int b = 0; b < EuchreGame.ButtonSlots; b++)
@@ -93,10 +97,12 @@ public static class EuchreTableBuilder
             }
         }
 
-        var up = Card("Upcard", root.transform, new Vector3(0, TableY + 0.004f, 0), Quaternion.Euler(90, 0, 0), game, 0, 0, true);
+        var upSpot = Spot("UpcardSpot", root.transform, new Vector3(0, TableY + 0.004f, 0));
+        var up = Card("Upcard", upSpot, Vector3.zero, Quaternion.Euler(90, 0, 0), game, 0, 0, true);
 
         // Trump marker beside the centre, readable from every side.
-        var trumpText = Text("TrumpMarker", root.transform, new Vector3(0.22f, TableY + 0.003f, 0.22f), Quaternion.Euler(90, 0, 0), 1.2f, new Vector2(0.2f, 0.2f), Color.black, false);
+        var trumpSpot = Spot("TrumpSpot", root.transform, new Vector3(0.22f, TableY + 0.003f, 0.22f));
+        var trumpText = Text("TrumpMarker", trumpSpot, Vector3.zero, Quaternion.Euler(90, 0, 0), 1.2f, new Vector2(0.2f, 0.2f), Color.black, false);
         trumpText.text = "";
 
         game.statusText = status;
@@ -107,6 +113,9 @@ public static class EuchreTableBuilder
         game.upcard = up;
         game.trumpText = trumpText;
         game.actionButtons = actionButtons;
+        game.trickSpots = trickSpots;
+        game.upcardSpot = upSpot;
+        game.trumpSpot = trumpSpot;
         game.tableRenderers = tableRenderers;
         game.buttonRenderers = buttonRenderers.ToArray();
         game.sitButtonRenderers = sitButtonRenderers.ToArray();
@@ -202,6 +211,14 @@ public static class EuchreTableBuilder
     }
 
     // ---------------- helpers ----------------
+    static Transform Spot(string name, Transform parent, Vector3 pos)
+    {
+        var t = new GameObject(name).transform;
+        t.SetParent(parent, false);
+        t.localPosition = pos;
+        return t;
+    }
+
     static GameObject Prim(PrimitiveType type, string name, Transform parent, Vector3 pos, Quaternion rot, Vector3 scale)
     {
         var go = GameObject.CreatePrimitive(type);
