@@ -35,6 +35,7 @@ public class EuchreGame : UdonSharpBehaviour
     public Material cardBackMaterial;
     public Material buttonMaterial;
     public Material sitButtonMaterial;
+    public AudioSource sfxSource;
 
     [Header("Rules")]
     public int pointsToWin = 10;
@@ -55,6 +56,29 @@ public class EuchreGame : UdonSharpBehaviour
     public float cardTilt = 55f;
     [Tooltip("Size of the turned cards on your screen.")]
     public float cardScale = 1.5f;
+
+    [Header("Sounds (all optional: leave a slot empty for silence)")]
+    [Tooltip("A new hand is dealt.")]
+    public AudioClip dealSound;
+    [Tooltip("A card lands on the table (plays and the dealer's discard). With several clips, one is picked at random.")]
+    public AudioClip[] cardSounds;
+    public AudioClip passSound;
+    [Tooltip("Someone orders up, picks up, or names trump.")]
+    public AudioClip trumpCalledSound;
+    [Tooltip("Optional: played instead of the trump sound when the maker goes alone.")]
+    public AudioClip goingAloneSound;
+    public AudioClip trickWonSound;
+    [Tooltip("The makers took 3 or 4 tricks.")]
+    public AudioClip madeItSound;
+    [Tooltip("All 5 tricks (falls back to the made-it sound when empty).")]
+    public AudioClip marchSound;
+    public AudioClip euchredSound;
+    public AudioClip gameWonSound;
+    [Tooltip("Played for you only when it becomes your turn to bid, discard or play.")]
+    public AudioClip yourTurnSound;
+    [Range(0f, 1f)] public float soundVolume = 0.8f;
+    [Tooltip("Random pitch change on each card, so repeated sounds don't sound identical.")]
+    public float cardPitchVariation = 0.06f;
 
     [Header("Testing")]
     [Tooltip("Lets the local player act for every seat and start without 4 players.")]
@@ -78,6 +102,19 @@ public class EuchreGame : UdonSharpBehaviour
     const int ActCallSuit = 7;      // arg: suit + 4 if alone
     const int ActPlayCard = 8;      // arg: card id
     const int ActDiscardCard = 9;   // arg: card id
+
+    // What the latest synced sound event is.
+    const int SfxNone = 0;
+    const int SfxDeal = 1;
+    const int SfxPass = 2;
+    const int SfxTrump = 3;
+    const int SfxAlone = 4;
+    const int SfxDiscard = 5;
+    const int SfxTrick = 6;
+    const int SfxMadeIt = 7;
+    const int SfxMarch = 8;
+    const int SfxEuchred = 9;
+    const int SfxGameWon = 10;
 
     const int BotSeat = -2;         // seatPlayers value for a bot-controlled seat
 
@@ -113,6 +150,8 @@ public class EuchreGame : UdonSharpBehaviour
     [UdonSynced] int playedMask = 0;    // bit per card id played this hand
     [UdonSynced] int timerDeadline = 0; // server time (ms) the next hand deals itself
     [UdonSynced] string lastEvent = "";
+    [UdonSynced] int sfxKind = SfxNone;
+    [UdonSynced] int sfxSerial = 0;
 
     // ---- local only ----
     bool localAlone = false;    // the local player's "Alone" toggle, sent along with their bid
@@ -127,6 +166,11 @@ public class EuchreGame : UdonSharpBehaviour
     int[] slotCode = new int[20];
     int[] slotArg = new int[20];
     int slotFill = 0;
+    bool soundsPrimed = false;  // late joiners don't replay the last event
+    bool gotState = false;
+    int heardSfx = 0;
+    int heardCards = 0;
+    int heardTurnKey = -1;
 
     string[] suitNames = { "Clubs", "Spades", "Hearts", "Diamonds" };
     string[] suitSymbols = { "♣", "♠", "♥", "♦" };
@@ -180,6 +224,7 @@ public class EuchreGame : UdonSharpBehaviour
 
     public override void OnDeserialization()
     {
+        gotState = true;
         Refresh();
     }
 
@@ -399,6 +444,7 @@ public class EuchreGame : UdonSharpBehaviour
         if (phase == PhaseBid1)
         {
             lastEvent = SeatName(s) + " passed.";
+            Sfx(SfxPass);
             if (s == dealer)
             {
                 phase = PhaseBid2;
@@ -421,6 +467,7 @@ public class EuchreGame : UdonSharpBehaviour
             else
             {
                 lastEvent = SeatName(s) + " passed.";
+                Sfx(SfxPass);
                 turn = NextSeat(s);
             }
         }
@@ -465,6 +512,7 @@ public class EuchreGame : UdonSharpBehaviour
         if (slot < 0) return;
         hands[s * HandSize + slot] = -1;
         lastEvent = SeatName(dealer) + " discarded.";
+        Sfx(SfxDiscard);
         BeginPlay();
         Commit();
     }
@@ -511,6 +559,7 @@ public class EuchreGame : UdonSharpBehaviour
         upcardId = deck[20];
         phase = PhaseBid1;
         turn = NextSeat(dealer);
+        Sfx(SfxDeal);
     }
 
     void ClearHand()
@@ -536,6 +585,7 @@ public class EuchreGame : UdonSharpBehaviour
         maker = s;
         goingAlone = alone;
         sittingOut = alone ? (s + 2) % 4 : -1;
+        Sfx(alone ? SfxAlone : SfxTrump);
     }
 
     void BeginPlay()
@@ -558,6 +608,7 @@ public class EuchreGame : UdonSharpBehaviour
         tricksWon[winner % 2]++;
         turn = winner;
         lastEvent = SeatName(winner) + " took the trick.";
+        Sfx(SfxTrick);
         if (tricksWon[0] + tricksWon[1] >= 5) ScoreHand();
     }
 
@@ -602,12 +653,14 @@ public class EuchreGame : UdonSharpBehaviour
             result = "got euchred";
         }
         score[team] += points;
+        Sfx(team != makers ? SfxEuchred : taken == 5 ? SfxMarch : SfxMadeIt);
         lastEvent = TeamName(makers) + " " + result + ". " + TeamName(team) + " +" + points + ".";
 
         if (score[team] >= pointsToWin)
         {
             phase = PhaseGameOver;
             lastEvent += " " + TeamName(team) + " win the game!";
+            Sfx(SfxGameWon);
         }
         else
         {
@@ -1172,6 +1225,78 @@ public class EuchreGame : UdonSharpBehaviour
 
         UpdateButtons();
         if (statusText != null) statusText.text = BuildStatus();
+        PlayEventSounds();
+    }
+
+    // ================= sounds =================
+
+    /// Owner: marks a sound event; every client plays it once when the state arrives.
+    void Sfx(int kind)
+    {
+        sfxKind = kind;
+        sfxSerial++;
+    }
+
+    void PlaySound(AudioClip clip, float pitch)
+    {
+        if (sfxSource == null || clip == null) return;
+        sfxSource.pitch = pitch;
+        sfxSource.PlayOneShot(clip, soundVolume);
+    }
+
+    void PlayCardSound()
+    {
+        if (cardSounds == null || cardSounds.Length == 0) return;
+        PlaySound(cardSounds[Random.Range(0, cardSounds.Length)], 1f + Random.Range(-cardPitchVariation, cardPitchVariation));
+    }
+
+    int CardsPlayed()
+    {
+        int n = 0;
+        for (int m = playedMask; m != 0; m &= m - 1) n++;
+        return n;
+    }
+
+    /// Every client: a card sound when a new card hits the table, the latest synced event, and a local
+    /// "your turn" cue. The first refresh only records the state, so joining mid-game is silent.
+    void PlayEventSounds()
+    {
+        int played = CardsPlayed();
+        int turnKey = (phase >= PhaseBid1 && phase <= PhasePlay) ? phase * 4 + (phase == PhaseDiscard ? dealer : turn) : -1;
+        if (!soundsPrimed)
+        {
+            // Wait for real state: a late joiner's Start() refresh still holds the defaults.
+            if (!gotState && !Networking.IsOwner(gameObject)) return;
+            soundsPrimed = true;
+            heardSfx = sfxSerial;
+            heardCards = played;
+            heardTurnKey = turnKey;
+            return;
+        }
+
+        if (played > heardCards) PlayCardSound();
+        heardCards = played;
+
+        if (sfxSerial != heardSfx)
+        {
+            heardSfx = sfxSerial;
+            if (sfxKind == SfxDeal) PlaySound(dealSound, 1f);
+            else if (sfxKind == SfxPass) PlaySound(passSound, 1f);
+            else if (sfxKind == SfxTrump) PlaySound(trumpCalledSound, 1f);
+            else if (sfxKind == SfxAlone) PlaySound(goingAloneSound != null ? goingAloneSound : trumpCalledSound, 1f);
+            else if (sfxKind == SfxDiscard) PlayCardSound();
+            else if (sfxKind == SfxTrick) PlaySound(trickWonSound, 1f);
+            else if (sfxKind == SfxMadeIt) PlaySound(madeItSound, 1f);
+            else if (sfxKind == SfxMarch) PlaySound(marchSound != null ? marchSound : madeItSound, 1f);
+            else if (sfxKind == SfxEuchred) PlaySound(euchredSound, 1f);
+            else if (sfxKind == SfxGameWon) PlaySound(gameWonSound, 1f);
+        }
+
+        if (turnKey != heardTurnKey)
+        {
+            heardTurnKey = turnKey;
+            if (turnKey >= 0 && !debugControlAllSeats && ControlsSeat(turnKey % 4)) PlaySound(yourTurnSound, 1f);
+        }
     }
 
     // ================= context buttons =================
