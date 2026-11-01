@@ -105,6 +105,17 @@ public static class EuchreTableBuilder
         var trumpText = Text("TrumpMarker", trumpSpot, Vector3.zero, Quaternion.Euler(90, 0, 0), 1.2f, new Vector2(0.2f, 0.2f), Color.black, false);
         trumpText.text = "";
 
+        var sfxGo = new GameObject("Sounds");
+        sfxGo.transform.SetParent(root.transform, false);
+        sfxGo.transform.localPosition = new Vector3(0, TableY + 0.2f, 0);
+        var sfx = sfxGo.AddComponent<AudioSource>();
+        sfx.playOnAwake = false;
+        sfx.spatialBlend = 1f;
+        sfx.minDistance = 2f;
+        sfx.maxDistance = 12f;
+        sfx.rolloffMode = AudioRolloffMode.Linear;
+
+        game.sfxSource = sfx;
         game.statusText = status;
         game.statusAnchor = statusAnchor;
         game.seatLabels = seatLabels;

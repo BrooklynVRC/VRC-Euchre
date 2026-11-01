@@ -12,6 +12,12 @@ A networked 4-player Euchre table for VRChat worlds, written in UdonSharp. Empty
 - Readable table: on your screen, other players' played cards, the upcard and the trump marker turn to face you, tilt up and grow 1.5x. Your own played card stays flat. It's visual only, so each player sees the table turned toward themselves.
 - Playable cards lift and glow on your turn, the winning card of each trick is highlighted, and a trump marker sits on the table.
 - Name tags float above and behind each player, so your own tag isn't in your face.
+- Sound slots, all optional:
+  - deal, card played (picked at random from several clips, with slight pitch variation), pass, trump called, going alone
+  - trick won, made it, march, euchred, game won
+  - a "your turn" cue that only you hear
+
+  Drop clips into the Sounds section on `EuchreGame`. They play through the `Sounds` AudioSource that Build Table creates.
 - Material slots on the game object let you restyle the table, card faces, card backs and buttons.
 
 ## Requirements
